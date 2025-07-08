@@ -397,7 +397,7 @@
             }
             connection.ontrack = event => {
 					remoteVideo.srcObject = event.streams[0];
-					log('✅ 遠端視訊流已接收');
+					console.log('✅ 遠端視訊流已接收');
 				};
             connection.onconnectionstatechange = () => {
 					console.log(`🌐 連線狀態: ${connection.connectionState}`);
@@ -580,9 +580,9 @@
       toGodot = gdCbFunc;
       // 立即測試回調
       gdCbFunc("JavaScript 回調函數已設置");
-      log("Godot callback function ready to use");
+      console.log("Godot callback function ready to use");
     } else {
-      log("Godot callback function must be a function");
+      console.log("Godot callback function must be a function");
     }
 	}
 };
