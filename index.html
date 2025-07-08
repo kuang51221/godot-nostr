@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
+    <title>Nostr</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+        }
+
+        #canvas {
+            /* The Godot canvas itself */
+            width: 100%;
+            height: 100%;
+            display: block;
+            /* Remove extra space below canvas */
+        }
+
+        /* Style the header */
+
+        header {
+            background-color: #666;
+            padding: 1px;
+            text-align: center;
+            font-size: 10px;
+            color: white;
+        }
+
+        /* Create two columns/boxes that floats next to each other */
+        nav {
+            float: left;
+            width: 80%;
+            /* height: 300px;  only for demonstration, should be removed */
+            background: #ccc;
+            padding: 5px;
+            overflow-y: auto;
+        }
+
+        /* Style the list inside the menu */
+        nav ul {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        article {
+            float: left;
+            padding: 5px;
+            width: 20%;
+            background-color: #f1f1f1;
+            /*height: 300px;  only for demonstration, should be removed */
+            overflow-y: scroll;
+        }
+
+        /* Clear floats after the columns */
+        section::after {
+            content: "";
+            display: table;
+            clear: both;
+        }
+
+        /* Style the footer */
+        footer {
+            background-color: #777;
+            padding: 10px;
+            text-align: center;
+            color: white;
+        }
+
+        /* Responsive layout - makes the two columns/boxes stack on top of each other instead of next to each other, on small screens */
+        @media (max-width: 600px) {
+
+            nav,
+            article {
+                width: 100%;
+                height: auto;
+            }
+        }
+
+        #video-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 3px;
+        }
+
+        video {
+            width: 95%;
+            border-radius: 1px;
+            padding: 3px;
+            background: rgba(255, 255, 255, 0);
+        }
+    </style>
+</head>
+
+
+<body>
+
+    <header>
+        <h3>Godot-Nostr</h3>
+    </header>
+    <section>
+        <nav>
+            <canvas id="canvas" width="460" height="360" style="border:1px solid #000000;">
+            </canvas>
+        </nav>
+        <article style="overflow-y: scroll;">
+
+            <div class="video" style="border-radius: 5px;">
+                <video id="localVideo" autoplay muted
+                    style="width: 100%;  background-color: rgb(4, 36, 4); margin-top: 1px;"></video>
+            </div>
+            <div class="video" style="border-radius: 5px;">
+                <video id="remoteVideo" autoplay
+                    style="width: 100%; background-color: rgb(4, 36, 4); margin-top: 1px;"></video>
+            </div>
+        </article>
+    </section>
+    <footer>
+        <div class="section">
+            <h2>1. 帳戶設置</h2>
+            <button id="generateKeys">生成新密鑰</button>
+            <div>
+                <label for="privateKey">私鑰 (nsec):</label>
+                <input type="text" id="privateKey" placeholder="nsec1...">
+            </div>
+            <div>
+                <label for="publicKey">公鑰 (npub):</label>
+                <input type="text" id="publicKey" readonly>
+            </div>
+
+        </div>
+
+        <div class="section">
+            <h2>2. 發佈主題消息</h2>
+            <div>
+                <label for="topic">主題:</label>
+                <input type="text" id="topic" placeholder="例如: news, bitcoin, nostr">
+            </div>
+            <div>
+                <label for="messageContent">消息內容:</label>
+                <textarea id="messageContent" rows="3"></textarea>
+            </div>
+            <button id="publish">發佈消息</button>
+            <div id="publishStatus"></div>
+        </div>
+        <div class="section">
+            <h2>3. 訂閱主題消息</h2>
+            <div>
+                <label for="subscribeTopic">Room:</label>
+                <input type="text" id="subscribeTopic" placeholder="輸入Room">
+            </div>
+            <button id="subscribe">開始Room訂閱</button>
+            <button id="unsubscribe" disabled>停止訂閱</button>
+            <h3>收到的消息:</h3>
+            <div id="receivedMessages"></div>
+        </div>
+    </footer>
+
+
+    <script type="module">
+        import * as nostrTools from "https://esm.sh/nostr-tools@2.15.0";
+
+        const {
+            generateSecretKey, getPublicKey, finalizeEvent, nip19, SimplePool, nip04
+        } = nostrTools;
+        // 全局變量
+        let room = 'nostr_14_room'
+        let privateKey = '';
+        let publicKey = '';
+        let remotePk = '';
+        let subscription = null;
+        let pool = new SimplePool();
+        let connections = new Map()
+        let candidateBuffers = new Map();
+        let relayConnections = []
+        const relays = ["wss://relay.damus.io", "wss://relay.snort.social", "wss://nos.lol"];
+        let localStream;
+        // DOM元素
+        const generateKeysBtn = document.getElementById('generateKeys');
+        const privateKeyInput = document.getElementById('privateKey');
+        const publicKeyInput = document.getElementById('publicKey');
+        const relayUrlInput = document.getElementById('relayUrl');
+
+        const topicInput = document.getElementById('topic');
+        const messageContentInput = document.getElementById('messageContent');
+        const publishBtn = document.getElementById('publish');
+        const publishStatus = document.getElementById('publishStatus');
+
+        const subscribeTopicInput = document.getElementById('subscribeTopic');
+        const subscribeBtn = document.getElementById('subscribe');
+        const unsubscribeBtn = document.getElementById('unsubscribe');
+        const receivedMessages = document.getElementById('receivedMessages');
+        const localVideo = document.getElementById('localVideo');
+		const remoteVideo = document.getElementById('remoteVideo');
+
+
+        topicInput.value = room
+        subscribeTopicInput.value = room
+        messageContentInput.value = `rtc test`
+        // 初始化
+        function init() {
+            generateKeysBtn.addEventListener('click', generateKeys);
+            publishBtn.addEventListener('click', publishMessage);
+            subscribeBtn.addEventListener('click', startSubscription);
+            unsubscribeBtn.addEventListener('click', stopSubscription);
+
+            // 從localStorage加載密鑰
+            if (localStorage.getItem('nostrPrivateKey')) {
+                privateKeyInput.value = localStorage.getItem('nostrPrivateKey');
+                updatePublicKey();
+            }
+        }
+
+        // 生成密鑰對
+        function generateKeys() {
+            try {
+                const sk = generateSecretKey();
+                const nsec = nip19.nsecEncode(sk);
+                privateKeyInput.value = nsec;
+                localStorage.setItem('nostrPrivateKey', nsec);
+                updatePublicKey();
+            } catch (error) {
+                console.error('生成密鑰錯誤:', error);
+                alert('生成密鑰失敗: ' + error.message);
+            }
+        }
+
+        // 更新公鑰顯示
+        function updatePublicKey() {
+            const nsec = privateKeyInput.value;
+            if (!nsec.startsWith('nsec1')) return;
+
+            try {
+                privateKey = nip19.decode(nsec).data;
+                publicKey = getPublicKey(privateKey);
+                const npub = nip19.npubEncode(publicKey);
+                publicKeyInput.value = npub;
+            } catch (error) {
+                console.error('解析密鑰錯誤:', error);
+            }
+        }
+
+        // 發佈消息
+        async function publishMessage() {
+            if (!privateKey) {
+                alert('請先生成或輸入私鑰');
+                return;
+            }
+
+            const topic = topicInput.value.trim();
+            const content = messageContentInput.value.trim();
+
+            if (!topic || !content) {
+                alert('請填寫主題和內容');
+                return;
+            }
+            try {
+                const msg = JSON.stringify({ "type": `presence`, "pubkey": publicKey, "content": content })
+                // 創建事件
+                const event = {
+                    kind: 25122,
+                    created_at: Math.floor(Date.now() / 1000),
+                    tags: [['t', topic]], // 主題標籤
+                    content: msg,
+                    pubkey: publicKey
+                };
+
+                // 簽名事件
+                const signedEvent = finalizeEvent(event, privateKey);
+                await Promise.any(pool.publish(relays, signedEvent));
+
+            } catch (e) {
+                console.error(`❌ 發送信令失敗: ${e}`)
+            }
+        }
+        // 發送presence在線消息
+        async function _sendPresence() {
+            if (!privateKey) {
+                alert('請先生成或輸入私鑰');
+                return;
+            }
+
+            const topic = topicInput.value.trim();
+            const content = messageContentInput.value.trim();
+
+            if (!topic || !content) {
+                alert('請填寫主題和內容');
+                return;
+            }
+            try {
+                const msg = JSON.stringify({ "type": `presence`, "pubkey": publicKey, "content": content })
+                // 創建事件
+                const event = {
+                    kind: 25122,
+                    created_at: Math.floor(Date.now() / 1000),
+                    tags: [['t', topic]], // 主題標籤
+                    content: msg,
+                    pubkey: publicKey
+                };
+
+                // 簽名事件
+                const signedEvent = finalizeEvent(event, privateKey);
+                await Promise.any(pool.publish(relays, signedEvent));
+
+            } catch (e) {
+                console.error(`❌ 發送信令失敗: ${e}`)
+            }
+        }
+
+        // 開始訂閱
+        async function startSubscription() {
+            const topic = subscribeTopicInput.value.trim();
+            if (!topic) {
+                alert('請輸入要訂閱的Room');
+                return;
+            }
+            subscription = pool.subscribe(relays,
+                {
+                    kinds: [25122],
+                    '#t': [topic], // 過濾特定主題
+                    since: Math.floor(Date.now() / 1000)  // 最近1分鐘的消息
+                },
+                {
+                    async onevent(event) {
+                        try {
+                            if (event.kind !== 25122) return; // 確保是主題
+                            displayMessage(event);
+                            _handleEvent(event);
+                       
+                        } catch (error) {
+                            console.error('解密消息錯誤:', error);
+                            return;
+                        }
+
+                    }
+                }
+            );
+
+            subscribeBtn.disabled = true;
+            unsubscribeBtn.disabled = false;
+            _sendPresence()
+            const presenceInterval = setInterval(() => publishMessage(), 30000)
+            //console.log(`已訂閱主題: ${topic}`);
+        }
+
+        function _handleEvent(event) {
+            if (event.pubkey === publicKey) return // 忽略自己的事件
+            remotePk = event.pubkey
+            try {
+                const data = JSON.parse(event.content)
+                if (data.type === 'presence') {
+                    _handlePeerPresence(remotePk)
+                } else if (data.type === 'signal') {
+                    _handleSignal(remotePk, data.signal)
+                }
+            } catch (e) {
+                console.error('Error parsing event content', e)
+            }
+        }
+
+        function _handlePeerPresence(remotePk) {
+            if (!connections.has(remotePk)) {
+                // 初始化新的 WebRTC 连接
+                _initConnection(remotePk)
+            }
+        }
+
+        async function _initConnection(remotePk) {
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+			localVideo.srcObject = localStream;
+            const connection = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            })
+            //記錄已建立的連接
+            connections.set(remotePk, connection)
+            localStream.getTracks().forEach(track => connection.addTrack(track, localStream));
+
+            // 设置数据通道
+            const dataChannel = connection.createDataChannel('trystero')
+
+            // 处理 ICE 候选
+            connection.onicecandidate = ({ candidate }) => {
+                if (candidate) {
+                    _sendSignal(remotePk, {
+                        type: 'ice',
+                        candidate
+                    })
+                }
+            }
+            connection.ontrack = event => {
+					remoteVideo.srcObject = event.streams[0];
+					log('✅ 遠端視訊流已接收');
+				};
+            connection.onconnectionstatechange = () => {
+					console.log(`🌐 連線狀態: ${connection.connectionState}`);
+				};
+
+            // 创建offer
+            const offer = await connection.createOffer()
+            await connection.setLocalDescription(offer)
+
+            _sendSignal(remotePk, {
+                type: 'offer',
+                sdp: offer.sdp
+            })
+        }
+
+        function _handleSignal(remotePk, signal) {
+            const connection = connections.get(remotePk);
+            if (!connection) return;
+
+            // 确保先处理offer/answer，再处理ICE候选
+            if (signal.type === 'offer') {
+                _handleOffer(remotePk, connection, signal);
+            } else if (signal.type === 'answer') {
+                _handleAnswer(connection, remotePk, signal);
+            } else if (signal.type === 'ice') {
+                _handleIce(connection, remotePk, signal);
+            }
+        }
+
+        async function _handleOffer(remotePk, connection, { sdp }) {
+            // 确保之前没有设置过远程描述
+            if (connection.remoteDescription) {
+                console.warn('Remote description already set')
+                return
+            }
+            await connection.setRemoteDescription({
+                type: 'offer',
+                sdp
+            })
+
+            const answer = await connection.createAnswer()
+            await connection.setLocalDescription(answer)
+
+            _sendSignal(remotePk, {
+                type: 'answer',
+                sdp: answer.sdp
+            })
+        }
+
+
+        async function _flushIceCandidates(connection, pubkey) {
+            if (!this.candidateBuffers.has(pubkey)) return;
+
+            const candidates = this.candidateBuffers.get(pubkey);
+            while (candidates.length > 0) {
+                const candidate = candidates.shift();
+                try {
+                    await connection.addIceCandidate(candidate);
+                } catch (e) {
+                    console.error('Error adding buffered ICE candidate', e);
+                }
+            }
+            this.candidateBuffers.delete(pubkey);
+        }
+
+        async function _handleAnswer(connection, pubkey, { sdp }) {
+            await connection.setRemoteDescription({
+                type: 'answer',
+                sdp
+            });
+            await this._flushIceCandidates(connection, pubkey);
+        }
+
+
+
+        async function _handleIce(connection, pubkey, { candidate }) {
+            // 如果远程描述尚未设置，缓冲候选
+            if (!connection.remoteDescription) {
+                if (!candidateBuffers.has(pubkey)) {
+                    candidateBuffers.set(pubkey, []);
+                }
+                candidateBuffers.get(pubkey).push(candidate);
+                return;
+            }
+
+            // 否则直接添加候选
+            try {
+                await connection.addIceCandidate(candidate);
+            } catch (e) {
+                console.error('Error adding ICE candidate', e);
+            }
+        }
+
+        async function _sendSignal(pubkey, signal) {
+            try {
+                // 創建事件
+                const event = {
+                    kind: 25122,
+                    created_at: Math.floor(Date.now() / 1000),
+                    tags: [
+                        ['t', room],
+                        ['p', pubkey] // 定向到特定对等节点
+                    ],
+                    content: JSON.stringify({
+                        type: 'signal',
+                        signal
+                    }),
+                    pubkey: publicKey
+                };
+
+                // 簽名事件
+                const signedEvent = finalizeEvent(event, privateKey);
+                await Promise.any(pool.publish(relays, signedEvent));
+
+            } catch (e) {
+                console.error(`❌ 發送信令失敗: ${e}`)
+            }
+
+        }
+
+        function getPeerConnectionState(connection) {
+            return {
+                signalingState: connection.signalingState,
+                iceGatheringState: connection.iceGatheringState,
+                iceConnectionState: connection.iceConnectionState,
+                connectionState: connection.connectionState
+            }
+        }
+
+        function disconnect() {
+            clearInterval(presenceInterval)
+            for (const relay of relayConnections) {
+                relay.close()
+            }
+            relayConnections = []
+        }
+
+        // 顯示接收到的消息
+        function displayMessage(event) {
+            const topicTag = event.tags.find(tag => tag[0] === 't');
+            const topic = topicTag ? topicTag[1] : '無主題';
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message';
+            messageDiv.innerHTML = `
+                <strong>主題: ${topic}</strong><br>
+                ${event.content}<br>
+                                
+                <small>來自: ${event.pubkey.substring(0, 10)}... | 
+                    ${new Date(event.created_at * 1000).toLocaleString()}</small>`
+                ;
+
+            receivedMessages.prepend(messageDiv);
+        }
+
+        // 停止訂閱
+        function stopSubscription() {
+            if (subscription) {
+                subscription.close(); // 或 subscription.unsub();
+                subscription = null;
+            }
+
+            subscribeBtn.disabled = false;
+            unsubscribeBtn.disabled = true;
+            console.log('已停止訂閱');
+        }
+
+        // 啟動應用
+        init();
+
+
+        var toGodot = null;
+
+  window.JSGD = {
+// 生成金鑰
+	getVal: function() {
+		return ("value" in window) ? value : "未設定";
+	},
+	gdcb: function(gdCbFunc) {
+		if (typeof gdCbFunc === "function") {
+      toGodot = gdCbFunc;
+      // 立即測試回調
+      gdCbFunc("JavaScript 回調函數已設置");
+      log("Godot callback function ready to use");
+    } else {
+      log("Godot callback function must be a function");
+    }
+	}
+};
+
+
+    </script>
+
+    
+    <!--  Godot Godot Bridge -->
+    <script src="index.js"></script>
+    <script>
+        const GODOT_THREADS_ENABLED = false;
+        var engine = new Engine({"args":[],"canvasResizePolicy":2,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":5246080,"index.wasm":43016933},"focusCanvas":true,"gdextensionLibs":[]});
+        engine.startGame({
+            /* optional override configuration, eg. */
+            //args:[],
+            //unloadAfterInit: false,
+            focusCanvas: true,
+            gdextensionLibs: [],
+            ensureCrossOriginIsolationHeaders: true,
+            canvasResizePolicy: 0,
+        });
+
+    </script>
+</body>
+
+</html>
