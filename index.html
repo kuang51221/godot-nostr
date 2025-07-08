@@ -568,25 +568,6 @@
         init();
 
 
-        var toGodot = null;
-
-  window.JSGD = {
-// 生成金鑰
-	getVal: function() {
-		return ("value" in window) ? value : "未設定";
-	},
-	gdcb: function(gdCbFunc) {
-		if (typeof gdCbFunc === "function") {
-      toGodot = gdCbFunc;
-      // 立即測試回調
-      gdCbFunc("JavaScript 回調函數已設置");
-      console.log("Godot callback function ready to use");
-    } else {
-      console.log("Godot callback function must be a function");
-    }
-	}
-};
-
 
     </script>
 
@@ -605,6 +586,24 @@
             ensureCrossOriginIsolationHeaders: true,
             canvasResizePolicy: 0,
         });
+
+        var toGodot = null;
+
+  window.JSGD = {
+	getVal: function() {
+		return ("value" in window) ? value : "未設定";
+	},
+	gdcb: function(gdCbFunc) {
+		if (typeof gdCbFunc === "function") {
+      toGodot = gdCbFunc;
+      // 立即測試回調
+      gdCbFunc("JavaScript 回調函數已設置");
+      console.log("Godot callback function ready to use");
+    } else {
+      console.log("Godot callback function must be a function");
+    }
+	}
+};
 
     </script>
 </body>
