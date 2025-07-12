@@ -647,40 +647,7 @@
         };
 
     </script>
- <!--  Godot Godot Bridge -->
-    <script src="index.js"></script>
-    <script>
-        const GODOT_THREADS_ENABLED = false;
-        var engine = new Engine({"args":[],"canvasResizePolicy":2,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":5246080,"index.wasm":43016933},"focusCanvas":true,"gdextensionLibs":[]});
-        engine.startGame({
-            /* optional override configuration, eg. */
-            //args:[],
-            //unloadAfterInit: false,
-            focusCanvas: true,
-            gdextensionLibs: [],
-            ensureCrossOriginIsolationHeaders: true,
-            canvasResizePolicy: 0,
-        });
-
-        var toGodot = null;
-
-        window.JSGD = {
-            getVal: function () {
-                return ("value" in window) ? value : "未設定";
-            },
-            gdcb: function (gdCbFunc) {
-                if (typeof gdCbFunc === "function") {
-                    toGodot = gdCbFunc;
-                    // 立即測試回調
-                    gdCbFunc("JavaScript 回調函數已設置");
-                    console.log("Godot callback function ready to use");
-                } else {
-                    console.log("Godot callback function must be a function");
-                }
-            }
-        };
-
-    </script>
+ 
     
     
 </body>
